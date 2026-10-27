@@ -1,0 +1,17 @@
+[project]
+name = "noita-lag-fixer-dev"
+version = "0.1.0"
+description = "Tests and tooling for the Lag Fixer Noita mod"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "capstone==5.0.7",
+    "lupa==2.6",
+    "pytest==8.4.2",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["tests", "tools"]

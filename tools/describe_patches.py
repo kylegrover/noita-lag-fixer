@@ -1,0 +1,167 @@
+"""Write PATCHES.txt: the mod's changes as disassembly, not just bytes.
+
+Reads the patch table in files/fixes.lua (the same data the mod applies) and disassembles
+every before/after with capstone. The original instructions of the two hooked regions are
+below, verified against the mod's check hashes. A test fails if the checked-in PATCHES.txt
+is stale. Usage: uv run tools/describe_patches.py
+"""
+from pathlib import Path
+import struct
+
+import capstone
+from lupa.lua51 import LuaRuntime
+
+ROOT = Path(__file__).resolve().parents[1]
+OUTPUT = ROOT / "PATCHES.txt"
+EXE_CAVE_VA, EXE_TABLE_VA = 0x12E9000, 0x12EA000
+HOOK_ORIGINALS = {  # the instructions the two hooks replace (checked against the mod's hashes)
+    0x659846: bytes.fromhex(
+        "e8c50bdfff0f28d00f57c00f2ed09ff6c4447b19f30f104c2420f30f10442440f30f5ecaf30f5ec2e8bd0adf"
+        "ff"),
+    0x9BD3DC: bytes.fromhex(
+        "8bb6c800000085f674608b44240c8d9b00000000390675478b46048b78348b48388b503c8b40403bfb75163b"
+        "4c241475103b54241c750a3b4424180f84190100003b7c241475143bcb75103b542418750a3b44241c0f84ff"
+        "0000008b44240c8b760c85f675ae8b7c2414"),
+}
+ABOUT = {
+    "bounds": [
+        "Bounding boxes start with max = 0x00800000 (FLT_MIN, the smallest positive float)",
+        "instead of -FLT_MAX. Boxes of things west of / above the world centre (all",
+        "coordinates < 0) then stretch to 0,0, and the 64-unit region searches over them",
+        "get huge (lava, western sky, even while paused). Same-length immediates:",
+        "RenderTiles draw jobs (0x7246b5, 0x7246bc) and two default boxes (0xad0ee2 ...).",
+    ],
+    "pixel scene dedup": [
+        "LoadPixelScene's duplicate check (0x87f3d0) repeats its read-only scan of both",
+        "pixel-scene lists once per pending scene. The outer loop's back-jump becomes a",
+        "6-byte NOP: one pass, same result.",
+    ],
+    "explosion angles": [
+        "Explosions call sqrt (0x44a410) and atan2 (0x44a330) for every cell of the blast",
+        "square, but the angle depends only on the cell offset (dx, dy). The hook jumps",
+        "to a cave that looks the angle up in a 1025 x 1025 table (offsets -512..512,",
+        "zero = not filled yet, stored XOR 0x7fc00001). On a miss it runs the original",
+        "instructions and stores the result; out-of-range offsets just run the original",
+        "instructions. Both paths return to 0x659873.",
+    ],
+    "contact walk": [
+        "Box2D's AddPair walks body B's whole contact list looking for an existing",
+        "contact between the two fixtures. Every contact is in both bodies' lists, so",
+        "the cave walks A's and B's lists side by side with the original match test and",
+        "stops when either ends: same answer, ~2x the shorter list. Not found -> 0x9bd446",
+        "(create the contact), found -> 0x9bd536 (return).",
+    ],
+    "sprite stains": [
+        "SpriteStains calls atan2 on the entity's rotation for every pixel of the sprite.",
+        "The call now goes to a one-entry memo: same inputs as last time -> return the",
+        "stored angle, otherwise call the original atan2 and remember {y, x, angle} in a",
+        "16-byte slot (one aligned read/write).",
+    ],
+}
+
+
+def load_fixes():
+    lua = LuaRuntime(unpack_returned_tuples=True, encoding=None)
+    module = lua.execute((ROOT / "files" / "fixes.lua").read_text())
+    return module, list(module.FIXES.values())
+
+
+def disasm(md, code, va):
+    out = list(md.disasm(code, va))
+    if sum(i.size for i in out) != len(code):
+        raise ValueError(f"Couldn't disassemble all bytes at {va:#x}")
+    return out
+
+
+def line(i, note=""):
+    text = f"    {i.address:08x}  {i.bytes.hex(' '):<33} {i.mnemonic} {i.op_str}".rstrip()
+    return f"{text:<88} ; {note}" if note else text
+
+
+def float_note(i):
+    if i.mnemonic == "mov" and i.operands and i.operands[-1].type == capstone.x86.X86_OP_IMM:
+        value = struct.unpack("<f", struct.pack("<I", i.operands[-1].imm & 0xFFFFFFFF))[0]
+        name = {0x00800000: "FLT_MIN", 0xFF7FFFFF: "-FLT_MAX"}.get(i.operands[-1].imm & 0xFFFFFFFF)
+        return f"{value:.7g}" + (f" ({name})" if name else "")
+    return ""
+
+
+def cave_notes(fix, cave_va):
+    """Offset of each adjusted field -> note."""
+    code = bytes.fromhex(fix.code.decode())
+    notes = {}
+    for at in fix.rel.values():
+        target = cave_va + at + 4 + struct.unpack_from("<i", code, at)[0]
+        notes[at] = f"adjusted at load: target {target:#x} in noita.exe"
+    for at in fix.abs.values():
+        offset = struct.unpack_from("<I", code, at)[0] - EXE_TABLE_VA
+        notes[at] = f"adjusted at load: data block +{offset:#x}"
+    return notes
+
+
+def describe():
+    module, fixes = load_fixes()
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    md.detail = True
+    out = [
+        "Lag Fixer - exactly what changes in noita.exe's memory",
+        "=" * 60,
+        "Build 9dbd52ce (Jan 25 2025, PE timestamp 0x6794ee3c), image base 0x400000.",
+        "Generated by tools/describe_patches.py from files/fixes.lua (the table the mod",
+        "applies); disassembly by capstone, Intel syntax.",
+        "",
+        "Nothing is written unless every 'before' below matches exactly (the two long hooked",
+        "regions are compared by check hash). Fixes already in a patched noita.exe are",
+        "skipped, and so are fixes turned off in Mod Settings. noita.exe on disk and saves",
+        "are never touched.",
+        "",
+        "Fixes 3-5 jump to caves in memory the mod allocates at startup: code 0x268 bytes",
+        "(made execute/read-only after writing) and a zeroed 0x402020-byte data block (the",
+        "angle table, then the stains slot at +0x402010). The caves are listed as if the",
+        f"code were at {EXE_CAVE_VA:#x} and the data at {EXE_TABLE_VA:#x} (right after the exe image).",
+        "Fields marked 'adjusted at load' are rewritten for the real allocation; logger.txt",
+        "has a 'Lag Fixer: added code at' line with the actual addresses.",
+    ]
+    for n, fix in enumerate(fixes, 1):
+        name = fix.name.decode()
+        out += ["", "", f"{n}. {name}", "-" * (len(name) + 3), *ABOUT[name], ""]
+        if fix.sites:
+            for site in fix.sites.values():
+                va = site[1]
+                before = disasm(md, bytes.fromhex(site[2].decode()), va)
+                after = disasm(md, bytes.fromhex(site[3].decode()), va)
+                out += ["  before", *(line(i, float_note(i)) for i in before)]
+                out += ["  after", *(line(i, float_note(i)) for i in after), ""]
+            continue
+        cave_va = EXE_CAVE_VA + fix.offset
+        if fix.hook:
+            va, length = fix.hook.va, fix.hook.length
+            original = HOOK_ORIGINALS[va]
+            if module.check_hash(original).decode() != fix.hook.check.decode() or len(original) != length:
+                raise ValueError(f"Original bytes at {va:#x} don't match the mod's check")
+            jump = b"\xe9" + struct.pack("<i", cave_va - (va + 5))
+            out += [f"  before ({length} bytes)", *(line(i) for i in disasm(md, original, va))]
+            out += ["  after", line(disasm(md, jump, va)[0], "adjusted at load: the cave"),
+                    f"    {va + 5:08x}  cc x {length - 5:<28} int3 (padding, never reached)"]
+        else:
+            va = fix.call.va
+            call = b"\xe8" + struct.pack("<i", cave_va - (va + 5))
+            out += ["  before", line(disasm(md, bytes.fromhex(fix.call.original.decode()), va)[0], "atan2")]
+            out += ["  after", line(disasm(md, call, va)[0], "adjusted at load: the cave")]
+        code = bytes.fromhex(fix.code.decode())
+        notes = cave_notes(fix, cave_va)
+        out += ["", f"  cave (code +{fix.offset:#x}, {len(code)} bytes)"]
+        for i in disasm(md, code, cave_va):
+            at = i.address - cave_va
+            note = next((v for k, v in notes.items() if at <= k < at + i.size), "")
+            out.append(line(i, note))
+    return "\n".join(out) + "\n"
+
+
+def main():
+    OUTPUT.write_text(describe(), encoding="ascii", newline="\n")
+    print(f"-> {OUTPUT}")
+
+
+if __name__ == "__main__":
+    main()

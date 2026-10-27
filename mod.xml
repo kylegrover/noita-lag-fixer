@@ -1,0 +1,6 @@
+<Mod
+    name="Lag Fixer"
+    description="Five performance fixes for noita.exe (Jan 25 2025 build), applied in memory at startup. Needs unsafe mods. Unofficial, not endorsed by Nolla. Exact changes: PATCHES.txt, github.com/kylegrover/noita-lag-fixer"
+    request_no_api_restrictions="1"
+>
+</Mod>
