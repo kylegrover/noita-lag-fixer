@@ -17,13 +17,13 @@ def test_mod_lua_is_lua51_syntax_and_ascii():
         compile_lua(source, name)
 
 
-def run_init(settings, status="Lag Fixer: 5 fixes applied", ffi=True):
+def run_init(settings, status="Lag Fixer: 5 fixes applied", ffi=True, report=None, io=True):
     lua = LuaRuntime(unpack_returned_tuples=True)
     g = lua.globals()
-    g.settings, g.status, g.ffi = lua.table_from(settings), status, ffi
+    g.settings, g.status, g.ffi, g.report, g.with_io = lua.table_from(settings), status, ffi, report, io
     g.memory_source = (ROOT / "files" / "memory.lua").read_text()
     lua.execute("""
-        loaded, printed, game_printed, asked = {}, {}, {}, {}
+        loaded, printed, game_printed, asked, files = {}, {}, {}, {}, {}
         function dofile_once(path)
             loaded[#loaded + 1] = path
             if path == "mods/noita-lag-fixer/files/memory.lua" then
@@ -31,41 +31,60 @@ def run_init(settings, status="Lag Fixer: 5 fixes applied", ffi=True):
                 return {}
             end
             assert(path == "mods/noita-lag-fixer/files/fixes.lua")
-            return {apply = function(memory, enabled)
+            return {apply = function(memory, enabled, options)
                 for _, id in ipairs({"bounds", "pixel_scene_dedup", "explosion_angles",
                                      "contact_walk", "sprite_stains"}) do
                     asked[id] = enabled(id)
                 end
-                return status
+                asked.other_builds = options.other_builds
+                return status, {}, report
             end}
         end
         function ModSettingGet(key) return settings[key] end
         function GamePrint(line) game_printed[#game_printed + 1] = line end
         function print(line) printed[#printed + 1] = line end
-        require = nil; io = nil; os = nil
+        require = nil; os = nil
+        io = with_io and {open = function(path, mode)
+            local file = {path = path, mode = mode, text = "", closed = false}
+            files[#files + 1] = file
+            function file:write(text) self.text = self.text .. text end
+            function file:close() self.closed = true end
+            return file
+        end} or nil
     """)
     lua.execute((ROOT / "init.lua").read_text())
     lua.execute("OnPlayerSpawned(1)")
+    files = [(f.path, f.mode, f.text, f.closed) for f in g.files.values()]
     return (list(g.loaded.values()), list(g.printed.values()), list(g.game_printed.values()),
-            dict(g.asked.items()))
+            dict(g.asked.items()), files)
 
 
 def test_init_applies_once_and_reports_in_game():
-    loaded, printed, game_printed, asked = run_init({"noita-lag-fixer.contact_walk": False})
+    loaded, printed, game_printed, asked, files = run_init({"noita-lag-fixer.contact_walk": False})
     assert loaded == ["mods/noita-lag-fixer/files/memory.lua", "mods/noita-lag-fixer/files/fixes.lua"]
     assert printed == game_printed == ["Lag Fixer: 5 fixes applied"]
     assert asked == {"bounds": True, "pixel_scene_dedup": True, "explosion_angles": True,
-                     "contact_walk": False, "sprite_stains": True}
+                     "contact_walk": False, "sprite_stains": True, "other_builds": False}
+    assert files == []
+
+
+def test_init_writes_the_scan_report_when_there_is_one():
+    status = "Lag Fixer: unsupported noita.exe version, nothing changed (5 of 5 fixes found, see scan-report.txt)"
+    _, printed, _, asked, files = run_init({"noita-lag-fixer.other_builds": True}, status, report="the report")
+    assert printed == [status] and asked["other_builds"] is True
+    assert files == [("mods/noita-lag-fixer/scan-report.txt", "w", "the report", True)]
+    _, printed, _, _, files = run_init({}, status, report="the report", io=False)
+    assert printed == [status] and files == []  # no io library: no report, still a status
 
 
 def test_init_without_the_ffi_explains_unsafe_mods():
-    loaded, printed, game_printed, _ = run_init({}, ffi=False)
+    loaded, printed, game_printed, _, _ = run_init({}, ffi=False)
     assert loaded == ["mods/noita-lag-fixer/files/memory.lua"]
     assert len(printed) == 1 and printed[0].startswith("Lag Fixer: needs unsafe mods allowed in the Mods menu (")
     assert game_printed == printed
 
 
-def test_one_restart_scope_setting_per_fix():
+def test_restart_scope_settings_per_fix_and_for_other_builds():
     lua = LuaRuntime(unpack_returned_tuples=True)
     lua.execute("""
         MOD_SETTING_SCOPE_RUNTIME_RESTART = 1
@@ -77,11 +96,12 @@ def test_one_restart_scope_setting_per_fix():
     lua.execute((ROOT / "settings.lua").read_text())
     lua.execute("ModSettingsUpdate(0); count = ModSettingsGuiCount(); ModSettingsGui(12, true)")
     g = lua.globals()
-    assert g.updated[1] == "noita-lag-fixer" and g.updated[3] == 0 and g.count == 5
+    assert g.updated[1] == "noita-lag-fixer" and g.updated[3] == 0 and g.count == 6
     assert list(g.shown.values()) == ["noita-lag-fixer", 12, True]
     settings = list(g.updated[2].values())
-    assert [s.id for s in settings] == [f.id.decode() for f in fix_list()]
-    assert all(s.value_default is True and s.scope == 1 for s in settings)
+    assert [s.id for s in settings] == [f.id.decode() for f in fix_list()] + ["other_builds"]
+    assert [s.value_default for s in settings] == [True] * 5 + [False]
+    assert all(s.scope == 1 for s in settings)
 
 
 def test_patch_listing_is_current():

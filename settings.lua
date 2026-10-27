@@ -23,6 +23,15 @@ mod_settings = {
         "Faster Box2D check for existing contacts (terrain touching lots of debris)."),
     fix("sprite_stains", "Sprite stains",
         "Wet/bloody/burning overlays: rotation computed once per sprite, not per pixel."),
+    {
+        id = "other_builds",
+        ui_name = "Other noita.exe versions",
+        ui_description = "Also apply fixes on a noita.exe other than the Jan 25 2025 Steam build"
+            .. " (GOG, a later update) when their code is found unchanged. Untested there."
+            .. " Off: only writes scan-report.txt. Takes effect after restarting Noita.",
+        value_default = false,
+        scope = MOD_SETTING_SCOPE_RUNTIME_RESTART,
+    },
 }
 
 function ModSettingsUpdate(init_scope)

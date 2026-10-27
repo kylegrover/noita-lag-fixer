@@ -2,7 +2,7 @@
 
 An unofficial Noita mod that adds five performance optimizations or bug fixes by patching the running game's memory at startup.
 
-It only works on the current build (Jan 25 2025). On any other version it does nothing. Not affiliated with or endorsed by Nolla Games.
+It's made for the current Steam build (Jan 25 2025). On any other noita.exe it changes nothing by default and writes a report of which fixes it could find (see [Other versions](#other-versions-gog-updates)). Not affiliated with or endorsed by Nolla Games.
 
 ## What it fixes
 
@@ -22,7 +22,9 @@ Each fix has its own toggle in Mod Settings (takes effect after restarting Noita
 3. Start or continue a run. The message log should say `Lag Fixer: 5 fixes applied`.
 
 It needs unsafe mods because the bugs are in the game's compiled code, which normal Lua mods
-can't reach. It uses LuaJIT's FFI only to patch memory (no file or network access).
+can't reach. It uses LuaJIT's FFI only to patch memory. The only file it writes is
+`scan-report.txt` in its own folder, and only on another noita.exe version or when something
+didn't match. No network access.
 
 ## What it changes
 
@@ -35,8 +37,23 @@ with a jump to added code. The added code lives in a small block the mod allocat
 zeroed block for the explosion angle table and the stains cache. The jump targets and data
 addresses are adjusted to wherever those blocks end up.
 
-Before writing anything, the mod checks every byte it's about to replace. If anything doesn't
-match (a different game version, or another mod already changed that code), it bails.
+Each fix finds its code by searching noita.exe for a byte pattern: the bytes it replaces plus
+some surrounding code, with wildcards only for addresses that move between builds of the same
+code. A fix is applied only if every one of its patterns matches exactly once, and on the
+Steam build at exactly the reviewed address. Anything else (another mod already changed that
+code, say) and it bails. The addresses the added code needs (sqrt, atan2, where to jump back)
+are read from the matched code.
+
+## Other versions (GOG, updates)
+
+On a noita.exe other than the Jan 25 2025 Steam build (the GOG version, or a future update),
+Lag Fixer changes nothing and writes `mods/noita-lag-fixer/scan-report.txt`, listing which
+fixes it found and where. If you're on GOG, please open an issue with that file.
+
+If a fix's code is there unchanged (just at different addresses), turning on **Other
+noita.exe versions** in Mod Settings applies it. That's untested on those builds, so keep
+backups of your saves. Fixes it can't find are skipped. A build compiled differently (like
+Steam's `noita_dev.exe`, where only fix 2 matches) needs the fixes redone for it.
 
 ## Messages
 
@@ -44,7 +61,8 @@ match (a different game version, or another mod already changed that code), it b
 |---|---|
 | `5 fixes applied` | Working. Fewer if some are turned off in Mod Settings. |
 | `fixes active` | Already applied earlier in this session (you started a new run). |
-| `unsupported noita.exe version, nothing changed` | Different game version. |
+| `unsupported noita.exe version, nothing changed (N of 5 fixes found, ...)` | Different game version, see [Other versions](#other-versions-gog-updates). |
+| `... (N not found in this noita.exe: ...)` | Other versions on: those fixes weren't found and were skipped. |
 | `unexpected code at ..., nothing changed` | The code it patches isn't what it expected, possibly another mod. |
 | `needs unsafe mods allowed in the Mods menu` | Unsafe mods are off. |
 
@@ -54,7 +72,12 @@ match (a different game version, or another mod already changed that code), it b
 uv run pytest                     # Lua tests under Lupa, against a fake game image
 uv run tools/describe_patches.py  # regenerate PATCHES.txt (a test fails if it's out of date)
 uv run tools/build_release.py     # dist/noita-lag-fixer.zip
+uv run tools/scan_exe.py path/to/noita.exe [--other-builds]  # scan report for an exe file, offline
+uv run tools/make_patterns.py     # the search patterns, from the Steam noita.exe
 ```
+
+With Noita installed, `tests/test_real_exe.py` also checks the patterns against the real
+`noita.exe` and `noita_dev.exe`.
 
 The bugs were found by profiling my god runs for laggy zones and having an LLM find the hot loops and reading the disassembly.
 
