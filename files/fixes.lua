@@ -206,8 +206,7 @@ function Fixes.apply(memory, enabled)
         end
     end
     if #unknown > 0 then
-        return PREFIX .. "unsupported noita.exe version, nothing changed ("
-            .. table.concat(unknown, ", ") .. ")", states
+        return PREFIX .. "unexpected code at " .. table.concat(unknown, ", ") .. ", nothing changed", states
     end
 
     local code_va, data_va = session_code, session_data

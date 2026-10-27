@@ -151,7 +151,8 @@ def test_any_unexpected_byte_writes_nothing(va):
     data = image()
     data[va - 0x400000] ^= 0x10
     memory = FakeMemory(data)
-    assert apply(memory)[0].startswith("Lag Fixer: unsupported noita.exe version, nothing changed (")
+    message = apply(memory)[0]
+    assert message.startswith("Lag Fixer: unexpected code at ") and message.endswith(", nothing changed")
     assert memory.writes == [] and memory.allocs == []
 
 
@@ -165,7 +166,7 @@ def test_other_build_or_layout_writes_nothing():
     bounds = fix_list()[0]
     va, raw = patched(bounds)[0]
     half.image[va - 0x400000:va - 0x400000 + len(raw)] = raw
-    assert apply(half)[0] == "Lag Fixer: unsupported noita.exe version, nothing changed (bounds)"
+    assert apply(half)[0] == "Lag Fixer: unexpected code at bounds, nothing changed"
     assert half.writes == []
 
 

@@ -17,10 +17,10 @@ def test_mod_lua_is_lua51_syntax_and_ascii():
         compile_lua(source, name)
 
 
-def run_init(settings, status="Lag Fixer: 5 fixes applied", caves=None, ffi=True):
+def run_init(settings, status="Lag Fixer: 5 fixes applied", ffi=True):
     lua = LuaRuntime(unpack_returned_tuples=True)
     g = lua.globals()
-    g.settings, g.status, g.caves, g.ffi = lua.table_from(settings), status, caves, ffi
+    g.settings, g.status, g.ffi = lua.table_from(settings), status, ffi
     g.memory_source = (ROOT / "files" / "memory.lua").read_text()
     lua.execute("""
         loaded, printed, game_printed, asked = {}, {}, {}, {}
@@ -28,7 +28,7 @@ def run_init(settings, status="Lag Fixer: 5 fixes applied", caves=None, ffi=True
             loaded[#loaded + 1] = path
             if path == "mods/noita-lag-fixer/files/memory.lua" then
                 if not ffi then return assert(loadstring(memory_source))() end
-                return {get_marker = function() return caves end}
+                return {}
             end
             assert(path == "mods/noita-lag-fixer/files/fixes.lua")
             return {apply = function(memory, enabled)
@@ -56,13 +56,6 @@ def test_init_applies_once_and_reports_in_game():
     assert printed == game_printed == ["Lag Fixer: 5 fixes applied"]
     assert asked == {"bounds": True, "pixel_scene_dedup": True, "explosion_angles": True,
                      "contact_walk": False, "sprite_stains": True}
-
-
-def test_init_logs_where_the_added_code_is():
-    _, printed, game_printed, _ = run_init({}, caves="0a3c0000:0b000000")
-    assert printed == ["Lag Fixer: 5 fixes applied",
-                       "Lag Fixer: added code at 0a3c0000:0b000000 (code:data, see PATCHES.txt)"]
-    assert game_printed == ["Lag Fixer: 5 fixes applied"]  # the addresses only go to the log
 
 
 def test_init_without_the_ffi_explains_unsafe_mods():
