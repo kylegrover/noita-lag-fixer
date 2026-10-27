@@ -70,3 +70,7 @@ uv run tools/build_release.py     # dist/noita-lag-fixer.zip
 The tests check that at the exe-patch addresses the mod writes exactly the on-disk patch's
 bytes, that every jump in the relocated code still lands on the same target, that the
 relocation lists cover every outside reference, and that any unexpected byte means no writes.
+
+## License
+
+MIT, see [LICENSE](LICENSE). Noita is (c) Nolla Games; this project is not affiliated with them.
