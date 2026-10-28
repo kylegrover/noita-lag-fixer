@@ -1,6 +1,6 @@
 # Noita Lag Fixer
 
-An unofficial Noita mod that adds five performance optimizations, plus two fixes for freezes and crashes very far out, by patching the running game's memory at startup.
+An unofficial Noita mod that adds five performance optimizations, plus two fixes for freezes and crashes very far out, by patching the running game's memory at startup. No gameplay is changed, all the calculations are identical just faster.
 
 It's made for the current Steam build (Jan 25 2025). On any other noita.exe it changes nothing by default and writes a report of which fixes it could find (see [Other versions](#other-versions-gog-updates)). Not affiliated with or endorsed by Nolla Games.
 
@@ -8,7 +8,7 @@ It's made for the current Steam build (Jan 25 2025). On any other noita.exe it c
 
 1. West and Sky Lag: Reduces rendering lag in the west, in the skies, and especially in the western skies. Ever noticed west PWs lag or crash sooner than the east PWs and the sky can get extra laggy? A render calculation's initialization value was leading to oversized bounding boxes in negative game world coordinate, ie anywhere to the left or up from (pretty close to) the starting point. This happens from a few things but particularly the lava in The Work (Sky) would set it off for me, and it happens even while paused. In a long run I tested the loop went from 81% of Noita's CPU time to 0.2%.
 2. Exploration Lag: This should fix some of frame drops experienced when entering a new zone on a long run. Pixel scene loading was doing duplicate checks per pending pixel scene, so a run gets slower the more you explore. On a long save I tested each call went from 17-30 ms to 0.04 ms.
-3. Explosions: Improves calculation time for all explosions by caching the results for a 1025x1025 cell patch. 
+3. Explosions: Improves calculation time for all explosions by caching the results for a 1025x1025 cell patch. Note this does at up to 4MB to the game's RAM usage.
 4. Physics Piles: An optimization that you'll only notice around really big piles of Box2D objects such as giant gold piles or debris. Speeds up the contact check by checking both lists at the same time and stopping at the shorter list.
 5. Sprite Stains: Small speedup for wet/bloody/burning overlays by sharing rotation calculations between pixels of the sprite to avoid recomputing for each.
 
