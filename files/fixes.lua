@@ -17,7 +17,7 @@
 -- write(va, bytes), alloc(code_bytes, data_bytes), seal(va, n), get_marker() and set_marker(s).
 local Fixes = {}
 
-Fixes.VERSION = "1.1.0"
+Fixes.VERSION = "1.1.1"
 local IMAGE_BASE, TIMESTAMP = 0x400000, 0x6794EE3C
 -- The caves are written for code at 0x12e9000 and data at 0x12ea000 (where an exe patched on disk
 -- puts them, right after the image) and relocated from there.

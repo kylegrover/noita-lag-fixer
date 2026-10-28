@@ -11,6 +11,10 @@ for _, declaration in ipairs({
     "int __stdcall FlushInstructionCache(void* process, const void* address, size_t size);",
     "uint32_t __stdcall GetEnvironmentVariableA(const char* name, char* buffer, uint32_t size);",
     "int __stdcall SetEnvironmentVariableA(const char* name, const char* value);",
+    "uint32_t __stdcall GetCurrentProcessId(void);",
+    "typedef struct { void* base; void* allocation_base; uint32_t allocation_protect; size_t size;"
+        .. " uint32_t state; uint32_t protect; uint32_t type; } lag_fixer_region;",
+    "size_t __stdcall VirtualQuery(const void* address, lag_fixer_region* info, size_t size);",
 }) do
     pcall(ffi.cdef, declaration)
 end
@@ -18,7 +22,9 @@ end
 local C = ffi.C
 local MEM_COMMIT_RESERVE, PAGE_READWRITE = 0x3000, 0x04
 local PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE = 0x20, 0x40
--- Process-wide, so a later Lua state (new game) finds the caves this process already has.
+local MEM_COMMIT = 0x1000
+-- Process-wide, so a later Lua state (new game) finds the caves this process already has. A
+-- process Noita starts (restart after changing mods) inherits it, so it carries the process id.
 local MARKER = "NOITA_LAG_FIXER_CAVES"
 
 local function address(pointer)
@@ -62,15 +68,31 @@ function memory.seal(va, n)
     C.FlushInstructionCache(C.GetCurrentProcess(), ffi.cast("void*", va), n)
 end
 
+-- True if va starts a committed allocation with the given protection.
+local function allocated(va, protection)
+    local info = ffi.new("lag_fixer_region")
+    if C.VirtualQuery(ffi.cast("void*", va), info, ffi.sizeof(info)) == 0 then return false end
+    return address(info.allocation_base) == va and info.state == MEM_COMMIT and info.protect == protection
+end
+
+-- The value set_marker stored in this process, or nil if it was set in another process or its
+-- memory isn't there.
 function memory.get_marker()
     local buffer = ffi.new("char[64]")
     local n = C.GetEnvironmentVariableA(MARKER, buffer, 64)
     if n == 0 or n >= 64 then return nil end
-    return ffi.string(buffer, n)
+    local pid, value = string.match(ffi.string(buffer, n), "^(%d+):(.*)$")
+    if tonumber(pid) ~= C.GetCurrentProcessId() then return nil end
+    local code, data = string.match(value, "^(%x+):(%x+)$")
+    if code == nil or not allocated(tonumber("0x" .. code), PAGE_EXECUTE_READ)
+        or not allocated(tonumber("0x" .. data), PAGE_READWRITE) then
+        return nil
+    end
+    return value
 end
 
 function memory.set_marker(value)
-    C.SetEnvironmentVariableA(MARKER, value)
+    C.SetEnvironmentVariableA(MARKER, C.GetCurrentProcessId() .. ":" .. value)
 end
 
 return memory

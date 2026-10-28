@@ -1,3 +1,4 @@
+import os
 import struct
 
 import capstone
@@ -234,7 +235,7 @@ def test_other_build_skips_what_it_cannot_find():
 def test_report_on_request_for_the_known_build():
     message, _, report = run(FakeMemory(), report=True)
     lines = report.splitlines()
-    assert lines[0] == "Lag Fixer 1.1.0 scan report" and lines[1] == "result: " + message
+    assert lines[0] == "Lag Fixer 1.1.1 scan report" and lines[1] == "result: " + message
     assert "(the build Lag Fixer was made for)" in lines[2]
     assert "code section .text at 0x00401000, 0x8ff000 bytes" in lines
     assert "  pattern 1 (0x007246a4 in the original build): 1 unpatched, 0 patched, at 0x007246a4" in lines
@@ -264,8 +265,18 @@ def test_ffi_backend_round_trip():
     memory.write(data + 0x402010, b"abcd")
     assert memory.read(data + 0x40200E, 8) == b"\x00\x00abcd\x00\x00"
     assert memory.image_base() > 0
-    memory.set_marker(b"0abc0000:01230000")
-    assert memory.get_marker() == b"0abc0000:01230000"
+    value = f"{code:08x}:{data:08x}".encode()
+    memory.set_marker(value)
+    assert memory.get_marker() == value
+    pid = os.getpid()
+    lua.execute(b'local ffi = require("ffi") ffi.C.SetEnvironmentVariableA("NOITA_LAG_FIXER_CAVES", "'
+                + f"{pid + 4}:".encode() + value + b'")')
+    assert memory.get_marker() is None  # inherited from the Noita that restarted this one
+    unsealed, _ = memory.alloc(CODE_BYTES, DATA_BYTES)
+    memory.set_marker(f"{unsealed:08x}:{data:08x}".encode())
+    assert memory.get_marker() is None
+    memory.set_marker(f"{code + 0x1000:08x}:{data:08x}".encode())
+    assert memory.get_marker() is None
 
 
 def test_runs_the_same_under_luajit():
