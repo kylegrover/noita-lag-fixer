@@ -24,7 +24,11 @@ SITES = {
     "explosion_angles": [(0x659846, 45, "hook")],
     "contact_walk": [(0x9BD3DC, 106, "hook")],
     "sprite_stains": [(0xC226D4, 5, "call")],
+    "far_rays": [(0x95CB07, 5, "call"), (0x95CB0C, 9, "bytes"), (0x95CDA5, 5, "call"), (0x95CDAA, 9, "bytes")],
+    "far_polygons": [(0x810865, 8, "bytes")],
 }
+# site va -> va the pattern must reach: patched short jumps whose target is past the context
+COVER = {0x810865: 0x8108D5}
 NAMES = {0x44A410: "sqrt", 0x44A330: "atan2", 0x9BD536: "found"}  # rel32 targets in hooked code
 
 MD = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
@@ -77,7 +81,7 @@ def instructions(exe, lo, hi):
 
 def pattern_for(exe, sites):
     """(start va, pattern with None = wildcard, symbols) for sites that share one pattern."""
-    first, last = sites[0][0], sites[-1][0] + sites[-1][1]
+    first, last = sites[0][0], max([sites[-1][0] + sites[-1][1]] + [COVER[s[0]] for s in sites if s[0] in COVER])
     ins = instructions(exe, first, last)
     lo = max(n for n, i in enumerate(ins) if i.address <= first - CONTEXT)
     hi = min(n for n, i in enumerate(ins) if i.address + i.size >= last + CONTEXT)
@@ -86,7 +90,10 @@ def pattern_for(exe, sites):
         for i in ins[lo:hi + 1]:
             raw = list(i.bytes)
             site = next((s for s in sites if s[0] <= i.address < s[0] + s[1]), None)
-            if site and i.address + i.size > site[0] + site[1]:
+            end = site and site[0] + site[1]
+            while end and any(s[0] == end for s in sites):  # adjacent sites replace whole instructions together
+                end += next(s[1] for s in sites if s[0] == end)
+            if site and i.address + i.size > end:
                 raise ValueError(f"site {site[0]:#x} ends inside an instruction")
             field = rel32_field(i)
             if field is not None and (site is None or site[2] != "bytes"):

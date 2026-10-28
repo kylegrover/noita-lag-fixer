@@ -26,7 +26,7 @@ def steam_exe():
 
 def test_finds_and_patches_exactly_the_reviewed_sites():
     message, report, memory = scan_exe.scan(steam_exe())
-    assert message == "Lag Fixer: 5 fixes applied", report
+    assert message == "Lag Fixer: 7 fixes applied", report
     code_va = int(memory.marker.split(b":")[0], 16)
     expected = sorted((va, raw) for fix in fix_list() for va, raw in patched(fix, code_va))
     assert sorted(w for w in memory.writes if w[0] != code_va) == expected
@@ -54,9 +54,9 @@ def test_dev_build_is_a_different_compile():
         pytest.skip("noita_dev.exe not installed")
     message, report, memory = scan_exe.scan(dev.read_bytes())
     assert message == ("Lag Fixer: unsupported noita.exe version, nothing changed"
-                       " (1 of 5 fixes found, see scan-report.txt)")
+                       " (2 of 7 fixes found, see scan-report.txt)")
     assert memory.writes == []
     message, report, memory = scan_exe.scan(dev.read_bytes(), other_builds=True)
-    assert message == ("Lag Fixer: 1 fix applied (4 not found in this noita.exe:"
-                       " bounds, explosion angles, contact walk, sprite stains)")
-    assert memory.writes == [(0x90C6DA, bytes.fromhex("660f1f440000"))]
+    assert message == ("Lag Fixer: 2 fixes applied (5 not found in this noita.exe:"
+                       " bounds, explosion angles, contact walk, sprite stains, far rays)")
+    assert memory.writes == [(0x90C6DA, bytes.fromhex("660f1f440000")), (0x884495, bytes.fromhex("8b45ec83c30ceb61"))]

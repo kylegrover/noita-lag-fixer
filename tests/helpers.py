@@ -11,7 +11,7 @@ from describe_patches import original_bytes, site_length
 
 IMAGE_BASE, TIMESTAMP = 0x400000, 0x6794EE3C
 EXE_CAVE_VA, EXE_TABLE_VA = 0x12E9000, 0x12EA000
-CODE_BYTES, DATA_BYTES = 0x268, 0x402020
+CODE_BYTES, DATA_BYTES = 0x2D0, 0x402020
 IMAGE_BYTES = 0x900000  # covers every patched site
 SECTION_TABLE = 0x80 + 24 + 0xE0
 

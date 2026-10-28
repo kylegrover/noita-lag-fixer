@@ -1,4 +1,4 @@
--- Five noita.exe performance fixes, applied to the running game's memory at startup.
+-- Seven noita.exe fixes (five performance, two for far-away freezes and crashes), applied
 -- Made for build 9dbd52ce (Jan 25 2025). PATCHES.txt shows every change as before/after disassembly.
 --
 -- Each fix finds its code by searching noita.exe's code sections for byte patterns: the
@@ -17,12 +17,12 @@
 -- write(va, bytes), alloc(code_bytes, data_bytes), seal(va, n), get_marker() and set_marker(s).
 local Fixes = {}
 
-Fixes.VERSION = "1.1.1"
+Fixes.VERSION = "1.2.0"
 local IMAGE_BASE, TIMESTAMP = 0x400000, 0x6794EE3C
 -- The caves are written for code at 0x12e9000 and data at 0x12ea000 (where an exe patched on disk
 -- puts them, right after the image) and relocated from there.
 local EXE_CAVE_VA, EXE_TABLE_VA = 0x12E9000, 0x12EA000
-local CODE_BYTES, DATA_BYTES = 0x268, 0x402020  -- caves; angle table + 16-byte stains slot
+local CODE_BYTES, DATA_BYTES = 0x2D0, 0x402020  -- caves; angle table + 16-byte stains slot
 local PREFIX = "Lag Fixer: "
 
 -- patterns: va = where the pattern starts in the build above; sites = what gets replaced, at a
@@ -110,6 +110,38 @@ Fixes.FIXES = {
             .. "6e01f30f104c240483c410c3",
         rel = {{0x41, "atan2"}},
         abs = {0x0B, 0x5A},
+    },
+    {   -- Far-away fixes. Two pixel-stepping ray functions loop forever past x ~16.7M (floats 2+
+        -- apart: x + 1 == x). The step goes through a cave doing the same two adds; if neither x nor
+        -- y moved, it moves the longer axis one float step toward the target (ecx/edx are free here).
+        id = "far_rays",
+        name = "far rays",
+        patterns = {
+            {va = 0x95CAF1, sites = {{at = 22, call = true}, {at = 27, patched = "660f1f840000000000"}},
+             bytes = "f30f1175e80f2ff00f86????????8b5d14f30f2c45d40f28c4f30f58d80f28c5f30f58d0f30f2cf3f30f115ddcf3"
+                .. "0f1155e03bf07511"},
+            {va = 0x95CD8F, sites = {{at = 22, call = true}, {at = 27, patched = "660f1f840000000000"}},
+             bytes = "f30f1175f40f2ff00f86????????8b5d14f30f2c45d40f28c4f30f58d80f28c5f30f58d0f30f2cf3f30f115ddcf3"
+                .. "0f1155e03bf07511"},
+        },
+        offset = 0x270,
+        code = "0f28c3f30f58dc0f28caf30f58d50f2ec37a4c754a0f2eca7a457543660f7ee1660f7eea81e1ffffff7f81e2ffff"
+            .. "ff7f39d17212660f7ed9660f7ee2e817000000660f6ed9c3660f7ed1660f7eeae805000000660f6ed1c331ca7802"
+            .. "41c349c3",
+        rel = {},
+        abs = {},
+    },
+    {   -- Far-away fixes. Terrain outlines simplified to nothing far out crash closing the loop (push_back(front())
+        -- of an empty vector). Its empty-only branch now skips to the next outline in place.
+        id = "far_polygons",
+        name = "far polygons",
+        patterns = {
+            {va = 0x810854, sites = {{at = 17, patched = "8b45ec83c30ceb61"}},
+             bytes = "8b04d989028b44d9048942048b5dfceb5f3bca754a8bc22bc1c1f80383f801733e2bcfb8ffffff1fc1f9032bc183"
+                .. "f80172752bd78d5901c1fa03b8ffffff1f8bcad1e92bc13bc2730433d2eb0203d13bd38bce0f42d352e8????????"
+                .. "8b5dfc8b4e0485c9740a8b0789018b47048941048b45ec83c30c834604088b75f846895dfc8b48048b382bcfb8ab"
+                .. "aaaa2a8975f8f7e9"},
+        },
     },
 }
 
@@ -323,10 +355,14 @@ local function scan_fix(memory, code, fix, known, session_code)
     end
     if not fix.code then return session_code and "session" or "exe", found end
     local state
-    for _, w in ipairs(writes(fix, vas, 0)) do
-        local this = cave_state(memory, fix, w.va, known, session_code) or "unknown"
-        if state ~= nil and state ~= this then return "unknown", found end
-        state = this
+    for k, p in ipairs(fix.patterns) do
+        for _, site in ipairs(p.sites) do
+            if not site.patched then  -- in-place bytes matched the applied pattern already
+                local this = cave_state(memory, fix, vas[k] + site.at, known, session_code) or "unknown"
+                if state ~= nil and state ~= this then return "unknown", found end
+                state = this
+            end
+        end
     end
     return state, found
 end

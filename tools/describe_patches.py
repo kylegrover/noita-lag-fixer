@@ -47,6 +47,27 @@ ABOUT = {
         "stored angle, otherwise call the original atan2 and remember {y, x, angle} in a",
         "16-byte slot (one aligned read/write).",
     ],
+    "far rays": [
+        "Two ray functions (0x95c970, 0x95cc40; LoadPixelScene reaches the first) step one",
+        "pixel at a time, x += dx, y += dy, until the distance walked reaches the ray's",
+        "length. Past x ~16.7M floats are 2+ apart, so x + 1 == x: the ray never moves and",
+        "the game hangs. The step now calls a cave doing the same two adds; only if",
+        "neither x nor y changed, it moves the longer axis one float step (the float's",
+        "bits +1 away from zero, -1 toward it) toward the target, so the ray keeps walking",
+        "and checking cells, just coarser, and ends by the loop's own length test. A unit",
+        "step always moves a coordinate below 2^24 (16.7M), so nothing changes there.",
+        "Far-away fix: does nothing for players who don't go that far.",
+    ],
+    "far polygons": [
+        "A worker job (0x810770) simplifies terrain outlines (0x927e10) and closes each",
+        "result with push_back(front()). Far out the points collapse, the result is empty",
+        "and front() is a null pointer: crash. The branch at 0x810865 only runs for an",
+        "empty result; it now goes straight to the next outline (same bookkeeping as the",
+        "loop, without adding the point), leaving the empty outline empty. Outputs start",
+        "empty and the simplifier fills any outline of 3+ points, so this branch only runs",
+        "where the original always crashed. Far-away fix: does nothing for players who",
+        "don't go that far.",
+    ],
 }
 
 
@@ -76,6 +97,17 @@ def original_bytes(fix, k):
 
 def site_length(site):
     return site.hook or (5 if site.call else len(site.patched) // 2)
+
+
+def site_runs(p):
+    """The pattern's sites in groups that touch end to end (together they replace whole instructions)."""
+    runs = []
+    for site in sorted(p.sites.values(), key=lambda s: s.at):
+        if runs and runs[-1][-1].at + site_length(runs[-1][-1]) == site.at:
+            runs[-1].append(site)
+        else:
+            runs.append([site])
+    return runs
 
 
 def disasm(md, code, va):
@@ -136,7 +168,7 @@ def describe():
         "Settings. Fixes turned off in Mod Settings are left alone. noita.exe on disk and",
         "saves are never touched.",
         "",
-        "Fixes 3-5 jump to added code in memory the mod allocates at startup: code 0x268 bytes",
+        "Fixes 3-6 jump to added code in memory the mod allocates at startup: code 0x2d0 bytes",
         "(made execute/read-only after writing) and a zeroed 0x402020-byte data block (the",
         "angle table, then the stains slot at +0x402010). The added code is listed as if the",
         f"code were at {EXE_CAVE_VA:#x} and the data at {EXE_TABLE_VA:#x} (right after the exe image).",
@@ -153,23 +185,25 @@ def describe():
         cave_va = EXE_CAVE_VA + fix.offset if fix.code else None
         for k, p in enumerate(patterns, 1):
             original = original_bytes(fix, k)
-            for site in p.sites.values():
-                va, length = p.va + site.at, site_length(site)
-                before = disasm(md, original[site.at:site.at + length], va)
+            for run in site_runs(p):
+                start, length = run[0].at, sum(site_length(s) for s in run)
+                before = disasm(md, original[start:start + length], p.va + start)
                 fields = symbol_fields(fix) if k == 1 else {}
-                out += ["", f"  before ({length} bytes)" if site.hook else "  before"]
+                out += ["", f"  before ({length} bytes)" if run[0].hook or len(run) > 1 else "  before"]
                 for i in before:
                     at = i.address - p.va
                     name = next((v[0] for f, v in fields.items() if at <= f < at + i.size), "")
                     out.append(line(i, float_note(i) or name))
                 out.append("  after")
-                if site.patched:
-                    out += [line(i, float_note(i)) for i in disasm(md, bytes.fromhex(site.patched.decode()), va)]
-                else:
-                    jump = (b"\xe9" if site.hook else b"\xe8") + struct.pack("<i", cave_va - (va + 5))
-                    out.append(line(disasm(md, jump, va)[0], "adjusted at load: the cave"))
-                    if site.hook:
-                        out.append(f"    {va + 5:08x}  cc x {length - 5:<28} int3 (padding, never reached)")
+                for site in run:
+                    va, length = p.va + site.at, site_length(site)
+                    if site.patched:
+                        out += [line(i, float_note(i)) for i in disasm(md, bytes.fromhex(site.patched.decode()), va)]
+                    else:
+                        jump = (b"\xe9" if site.hook else b"\xe8") + struct.pack("<i", cave_va - (va + 5))
+                        out.append(line(disasm(md, jump, va)[0], "adjusted at load: the cave"))
+                        if site.hook:
+                            out.append(f"    {va + 5:08x}  cc x {length - 5:<28} int3 (padding, never reached)")
         if fix.code:
             code = bytes.fromhex(fix.code.decode())
             notes = cave_notes(fix, cave_va)

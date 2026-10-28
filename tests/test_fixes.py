@@ -8,7 +8,7 @@ import pytest
 from helpers import (CODE_BYTES, DATA_BYTES, EXE_CAVE_VA, EXE_TABLE_VA, IMAGE_BASE, IMAGE_BYTES, ROOT,
                      FakeMemory, apply, fix_list, image, originals, patched, run, sites)
 
-ALL_IDS = ["bounds", "pixel_scene_dedup", "explosion_angles", "contact_walk", "sprite_stains"]
+ALL_IDS = ["bounds", "pixel_scene_dedup", "explosion_angles", "contact_walk", "sprite_stains", "far_rays", "far_polygons"]
 
 
 def disassembler():
@@ -60,14 +60,16 @@ def test_patterns_contain_the_replaced_bytes():
                 replaced = text[site.at * 2:]
                 if site.patched:
                     assert "??" not in replaced[:len(site.patched)]
-                elif site.call:
+                elif site.call and replaced.startswith("e8"):  # a call moved to the cave
                     assert replaced.startswith("e8????????")
+                elif site.call:
+                    assert "??" not in replaced[:10]
 
 
 def test_at_the_on_disk_addresses_writes_exactly_the_on_disk_patch():
     memory = FakeMemory()
     message, states, report = run(memory)
-    assert message == "Lag Fixer: 5 fixes applied" and report is None
+    assert message == "Lag Fixer: 7 fixes applied" and report is None
     assert set(states.values()) == {"original"}
     fixes = fix_list()
     for fix in fixes:
@@ -89,7 +91,7 @@ def test_elsewhere_branches_keep_their_targets_and_data_moves():
     md = disassembler()
     code_va, data_va = 0x2340000, 0x5670000
     memory = FakeMemory(alloc_at=(code_va, data_va))
-    assert apply(memory)[0] == "Lag Fixer: 5 fixes applied"
+    assert apply(memory)[0] == "Lag Fixer: 7 fixes applied"
     moved, shift = bytes(memory.blocks[code_va]), data_va - EXE_TABLE_VA
     for fix in caves(fix_list()):
         cave, raw = EXE_CAVE_VA + fix.offset, bytes.fromhex(fix.code.decode())
@@ -128,7 +130,7 @@ def test_exe_patched_on_disk_is_left_alone():
 def test_partly_patched_exe_gets_the_rest():
     memory = FakeMemory(image(on_disk=["bounds", "pixel_scene_dedup", "sprite_stains"]))
     message, states = apply(memory)
-    assert message == "Lag Fixer: 2 fixes applied (3 already in noita.exe)"
+    assert message == "Lag Fixer: 4 fixes applied (3 already in noita.exe)"
     assert states["bounds"] == "exe" and states["sprite stains"] == "exe"
     assert states["contact walk"] == "original"
     for fix in fix_list():
@@ -139,12 +141,12 @@ def test_partly_patched_exe_gets_the_rest():
 def test_turned_off_fixes_are_left_alone():
     memory = FakeMemory()
     message, _ = apply(memory, lambda fix_id: fix_id != b"explosion_angles")
-    assert message == "Lag Fixer: 4 fixes applied (1 off)"
+    assert message == "Lag Fixer: 6 fixes applied (1 off)"
     explosions = next(f for f in fix_list() if f.id == b"explosion_angles")
     assert all(memory.read(va, len(raw)) == raw for va, raw in originals(explosions))
 
     memory = FakeMemory()
-    assert apply(memory, lambda fix_id: fix_id == b"bounds")[0] == "Lag Fixer: 1 fix applied (4 off)"
+    assert apply(memory, lambda fix_id: fix_id == b"bounds")[0] == "Lag Fixer: 1 fix applied (6 off)"
     assert memory.allocs == []  # no added code needed
 
     memory = FakeMemory()
@@ -164,7 +166,8 @@ def bad_byte_addresses():
     return [sites(fixes[0])[3][0] + 4, sites(fixes[1])[0][0], sites(fixes[2])[0][0] + 30,
             sites(fixes[3])[0][0] + 105,
             sites(fixes[4])[0][0] + 1,  # in atan2's address: the call goes somewhere else
-            fixes[3].patterns[1].va + 2]  # context before the hooked code
+            fixes[3].patterns[1].va + 2,  # context before the hooked code
+            sites(fixes[5])[0][0] - 14]  # the jbe that far rays' je lands on
 
 
 @pytest.mark.parametrize("va", bad_byte_addresses())
@@ -182,7 +185,7 @@ def test_other_build_or_layout_writes_nothing_by_default():
     for memory in (FakeMemory(image(timestamp=0x12345678)), FakeMemory(base=0x10000000)):
         message, _, report = run(memory)
         assert message == ("Lag Fixer: unsupported noita.exe version, nothing changed"
-                           " (5 of 5 fixes found, see scan-report.txt)")
+                           " (7 of 7 fixes found, see scan-report.txt)")
         assert memory.writes == [] and memory.allocs == []
         assert "(Lag Fixer was made for 0x6794ee3c at 0x00400000)" in report
     not_pe = FakeMemory(bytearray(IMAGE_BYTES))
@@ -198,14 +201,14 @@ def test_other_build_with_the_code_moved():
     shift, code_va, data_va = 0x2345, 0x2340000, 0x5670000
     memory = FakeMemory(image(shift=shift, timestamp=0x12345678), alloc_at=(code_va, data_va))
     message, states, report = run(memory, other_builds=True)
-    assert message == "Lag Fixer: 5 fixes applied" and set(states.values()) == {"original"}
+    assert message == "Lag Fixer: 7 fixes applied" and set(states.values()) == {"original"}
     lua = LuaRuntime(unpack_returned_tuples=True, encoding=None)
     module = lua.execute((ROOT / "files" / "fixes.lua").read_text())
     for fix in fix_list(module):
         for va, raw in patched(fix, code_va, shift):
             assert memory.read(va, len(raw)) == raw
         if fix.code:
-            symbols = lua.table_from({name: s.steam + shift for name, s in fix.symbols.items()})
+            symbols = lua.table_from({name: s.steam + shift for name, s in (fix.symbols or {}).items()})
             moved = module.relocate(fix, code_va, data_va, symbols)
             assert memory.read(code_va + fix.offset, len(moved)) == moved
     assert "PE timestamp 0x12345678" in report
@@ -221,7 +224,7 @@ def test_other_build_skips_what_it_cannot_find():
     data[0x8F0000:0x8F0000 + len(p.bytes) // 2] = data[copy:copy + len(p.bytes) // 2]  # found twice
     memory = FakeMemory(data, alloc_at=(0x2340000, 0x5670000))
     message, states, report = run(memory, other_builds=True)
-    assert message == "Lag Fixer: 3 fixes applied (2 not found in this noita.exe: explosion angles, contact walk)"
+    assert message == "Lag Fixer: 5 fixes applied (2 not found in this noita.exe: explosion angles, contact walk)"
     assert states["contact walk"] == states["explosion angles"] == "missing"
     block = bytes(memory.blocks[0x2340000])
     assert block[0:0x200] == b"\xcc" * 0x200  # caves of fixes not found: never jumped to
@@ -235,7 +238,7 @@ def test_other_build_skips_what_it_cannot_find():
 def test_report_on_request_for_the_known_build():
     message, _, report = run(FakeMemory(), report=True)
     lines = report.splitlines()
-    assert lines[0] == "Lag Fixer 1.1.1 scan report" and lines[1] == "result: " + message
+    assert lines[0] == "Lag Fixer 1.2.0 scan report" and lines[1] == "result: " + message
     assert "(the build Lag Fixer was made for)" in lines[2]
     assert "code section .text at 0x00401000, 0x8ff000 bytes" in lines
     assert "  pattern 1 (0x007246a4 in the original build): 1 unpatched, 0 patched, at 0x007246a4" in lines
@@ -285,7 +288,46 @@ def test_runs_the_same_under_luajit():
     module = lua.execute((ROOT / "files" / "fixes.lua").read_text())
     options = lua.table_from({b"other_builds": True})
     memory = FakeMemory(image(shift=0x2345, timestamp=1), alloc_at=(0x2340000, 0x5670000))
-    assert module.apply(memory, None, options)[0] == b"Lag Fixer: 5 fixes applied"
+    assert module.apply(memory, None, options)[0] == b"Lag Fixer: 7 fixes applied"
     reference = FakeMemory(image(shift=0x2345, timestamp=1), alloc_at=(0x2340000, 0x5670000))
     run(reference, other_builds=True)
     assert memory.writes == reference.writes
+
+
+def run_far_rays_cave(x, y, dx, dy):
+    """(x, y) after the far rays cave's step, run on an x86 emulator; xmm3/xmm2 = x/y, xmm4/xmm5 = dx/dy."""
+    from unicorn import UC_ARCH_X86, UC_MODE_32, Uc
+    from unicorn.x86_const import UC_X86_REG_ESP, UC_X86_REG_XMM2, UC_X86_REG_XMM3, UC_X86_REG_XMM4, UC_X86_REG_XMM5
+    cave = next(f for f in fix_list() if f.id == b"far_rays")
+    base, stack = 0x100000, 0x200000
+    mu = Uc(UC_ARCH_X86, UC_MODE_32)
+    mu.mem_map(base, 0x1000)
+    mu.mem_map(stack - 0x1000, 0x2000)
+    mu.mem_write(base, bytes.fromhex(cave.code.decode()))
+    mu.mem_write(base + 0x800, b"\xe8" + struct.pack("<i", base - (base + 0x805)))  # call the cave
+    mu.reg_write(UC_X86_REG_ESP, stack)
+    for reg, value in ((UC_X86_REG_XMM3, x), (UC_X86_REG_XMM2, y), (UC_X86_REG_XMM4, dx), (UC_X86_REG_XMM5, dy)):
+        mu.reg_write(reg, struct.unpack("<I", struct.pack("<f", value))[0])
+    mu.emu_start(base + 0x800, base + 0x805)
+    assert mu.reg_read(UC_X86_REG_ESP) == stack
+    return tuple(struct.unpack("<f", struct.pack("<I", mu.reg_read(r) & 0xFFFFFFFF))[0]
+                 for r in (UC_X86_REG_XMM3, UC_X86_REG_XMM2))
+
+
+def float32(value):
+    return struct.unpack("<f", struct.pack("<f", value))[0]
+
+
+@pytest.mark.parametrize("x, y, dx, dy", [
+    (1234.5, -567.25, 0.6, 0.8), (-35840.0, 1200.0, -1.0, 0.0), (16000000.5, 10.0, 0.707, 0.707),
+    (8388609.0, -3.0, -1.0, 0.0), (1e9, 300.0, -0.8, 0.6)])  # last: x stuck, y still moves
+def test_far_rays_step_is_the_original_add_when_it_moves(x, y, dx, dy):
+    assert run_far_rays_cave(x, y, dx, dy) == (float32(float32(x) + float32(dx)), float32(float32(y) + float32(dy)))
+
+
+@pytest.mark.parametrize("x, y, dx, dy, expected", [
+    (19999944.0, 295.0, -1.0, 0.0, (19999942.0, 295.0)), (19999944.0, 295.0, 1.0, 0.0, (19999946.0, 295.0)),
+    (-19999944.0, 295.0, 1.0, 0.0, (-19999942.0, 295.0)), (-19999944.0, 295.0, -1.0, 0.0, (-19999946.0, 295.0)),
+    (19999944.0, 20000000.0, 0.1, -0.995, (19999944.0, 19999998.0)), (1e9, 1e9, 0.6, 0.8, (1e9, 1e9 + 64))])
+def test_far_rays_stuck_step_moves_the_longer_axis_one_float_toward_the_end(x, y, dx, dy, expected):
+    assert run_far_rays_cave(x, y, dx, dy) == expected

@@ -10,6 +10,7 @@ dev = [
     "capstone==5.0.7",
     "lupa==2.6",
     "pytest==8.4.2",
+    "unicorn==2.1.4",
 ]
 
 [tool.pytest.ini_options]

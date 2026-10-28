@@ -69,7 +69,7 @@ def test_init_applies_once_and_reports_in_game():
 
 
 def test_init_writes_the_scan_report_when_there_is_one():
-    status = "Lag Fixer: unsupported noita.exe version, nothing changed (5 of 5 fixes found, see scan-report.txt)"
+    status = "Lag Fixer: unsupported noita.exe version, nothing changed (7 of 7 fixes found, see scan-report.txt)"
     _, printed, _, asked, files = run_init({"noita-lag-fixer.other_builds": True}, status, report="the report")
     assert printed == [status] and asked["other_builds"] is True
     assert files == [("mods/noita-lag-fixer/scan-report.txt", "w", "the report", True)]
@@ -96,11 +96,14 @@ def test_restart_scope_settings_per_fix_and_for_other_builds():
     lua.execute((ROOT / "settings.lua").read_text())
     lua.execute("ModSettingsUpdate(0); count = ModSettingsGuiCount(); ModSettingsGui(12, true)")
     g = lua.globals()
-    assert g.updated[1] == "noita-lag-fixer" and g.updated[3] == 0 and g.count == 6
+    assert g.updated[1] == "noita-lag-fixer" and g.updated[3] == 0 and g.count == 7
     assert list(g.shown.values()) == ["noita-lag-fixer", 12, True]
-    settings = list(g.updated[2].values())
+    top = list(g.updated[2].values())
+    far = next(s for s in top if s.category_id == "far_away")
+    assert far.ui_name == "Far-away fixes" and [s.id for s in far.settings.values()] == ["far_rays", "far_polygons"]
+    settings = [s for t in top for s in (t.settings.values() if t.category_id else [t])]
     assert [s.id for s in settings] == [f.id.decode() for f in fix_list()] + ["other_builds"]
-    assert [s.value_default for s in settings] == [True] * 5 + [False]
+    assert [s.value_default for s in settings] == [True] * 7 + [False]
     assert all(s.scope == 1 for s in settings)
 
 

@@ -12,7 +12,7 @@ noita.exe nothing is written unless 'Other noita.exe versions' is on in Mod
 Settings. Fixes turned off in Mod Settings are left alone. noita.exe on disk and
 saves are never touched.
 
-Fixes 3-5 jump to added code in memory the mod allocates at startup: code 0x268 bytes
+Fixes 3-6 jump to added code in memory the mod allocates at startup: code 0x2d0 bytes
 (made execute/read-only after writing) and a zeroed 0x402020-byte data block (the
 angle table, then the stains slot at +0x402010). The added code is listed as if the
 code were at 0x12e9000 and the data at 0x12ea000 (right after the exe image).
@@ -41,14 +41,11 @@ RenderTiles draw jobs (0x7246b5, 0x7246bc) and two default boxes (0xad0ee2 ...).
     f30f594c2418c744244cffff7f7f05c39e2600c744242000008000a3????????f30f5ce8c1f810f3
     0f58e125ff7f0000c74424240000800099f7f9f30f1164241cf30f116c24648d4204
 
-  before
+  before (14 bytes)
     007246b5  c7 42 34 00 00 80 00              mov dword ptr [edx + 0x34], 0x800000     ; 1.175494e-38 (FLT_MIN)
-  after
-    007246b5  c7 42 34 ff ff 7f ff              mov dword ptr [edx + 0x34], 0xff7fffff   ; -3.402823e+38 (-FLT_MAX)
-
-  before
     007246bc  c7 42 38 00 00 80 00              mov dword ptr [edx + 0x38], 0x800000     ; 1.175494e-38 (FLT_MIN)
   after
+    007246b5  c7 42 34 ff ff 7f ff              mov dword ptr [edx + 0x34], 0xff7fffff   ; -3.402823e+38 (-FLT_MAX)
     007246bc  c7 42 38 ff ff 7f ff              mov dword ptr [edx + 0x38], 0xff7fffff   ; -3.402823e+38 (-FLT_MAX)
 
   before
@@ -330,3 +327,104 @@ stored angle, otherwise call the original atan2 and remember {y, x, angle} in a
     012e925e  f3 0f 10 4c 24 04                 movss xmm1, dword ptr [esp + 4]
     012e9264  83 c4 10                          add esp, 0x10
     012e9267  c3                                ret
+
+
+6. far rays
+-----------
+Two ray functions (0x95c970, 0x95cc40; LoadPixelScene reaches the first) step one
+pixel at a time, x += dx, y += dy, until the distance walked reaches the ray's
+length. Past x ~16.7M floats are 2+ apart, so x + 1 == x: the ray never moves and
+the game hangs. The step now calls a cave doing the same two adds; only if
+neither x nor y changed, it moves the longer axis one float step (the float's
+bits +1 away from zero, -1 toward it) toward the target, so the ray keeps walking
+and checking cells, just coarser, and ends by the loop's own length test. A unit
+step always moves a coordinate below 2^24 (16.7M), so nothing changes there.
+Far-away fix: does nothing for players who don't go that far.
+
+  pattern at 0x95caf1
+    f30f1175e80f2ff00f86????????8b5d14f30f2c45d40f28c4f30f58d80f28c5f30f58d0f30f2cf3
+    f30f115ddcf30f1155e03bf07511
+
+  pattern at 0x95cd8f
+    f30f1175f40f2ff00f86????????8b5d14f30f2c45d40f28c4f30f58d80f28c5f30f58d0f30f2cf3
+    f30f115ddcf30f1155e03bf07511
+
+  before (14 bytes)
+    0095cb07  0f 28 c4                          movaps xmm0, xmm4
+    0095cb0a  f3 0f 58 d8                       addss xmm3, xmm0
+    0095cb0e  0f 28 c5                          movaps xmm0, xmm5
+    0095cb11  f3 0f 58 d0                       addss xmm2, xmm0
+  after
+    0095cb07  e8 64 c7 98 00                    call 0x12e9270                           ; adjusted at load: the cave
+    0095cb0c  66 0f 1f 84 00 00 00 00 00        nop word ptr [eax + eax]
+
+  before (14 bytes)
+    0095cda5  0f 28 c4                          movaps xmm0, xmm4
+    0095cda8  f3 0f 58 d8                       addss xmm3, xmm0
+    0095cdac  0f 28 c5                          movaps xmm0, xmm5
+    0095cdaf  f3 0f 58 d0                       addss xmm2, xmm0
+  after
+    0095cda5  e8 c6 c4 98 00                    call 0x12e9270                           ; adjusted at load: the cave
+    0095cdaa  66 0f 1f 84 00 00 00 00 00        nop word ptr [eax + eax]
+
+  cave (code +0x270, 96 bytes)
+    012e9270  0f 28 c3                          movaps xmm0, xmm3
+    012e9273  f3 0f 58 dc                       addss xmm3, xmm4
+    012e9277  0f 28 ca                          movaps xmm1, xmm2
+    012e927a  f3 0f 58 d5                       addss xmm2, xmm5
+    012e927e  0f 2e c3                          ucomiss xmm0, xmm3
+    012e9281  7a 4c                             jp 0x12e92cf
+    012e9283  75 4a                             jne 0x12e92cf
+    012e9285  0f 2e ca                          ucomiss xmm1, xmm2
+    012e9288  7a 45                             jp 0x12e92cf
+    012e928a  75 43                             jne 0x12e92cf
+    012e928c  66 0f 7e e1                       movd ecx, xmm4
+    012e9290  66 0f 7e ea                       movd edx, xmm5
+    012e9294  81 e1 ff ff ff 7f                 and ecx, 0x7fffffff
+    012e929a  81 e2 ff ff ff 7f                 and edx, 0x7fffffff
+    012e92a0  39 d1                             cmp ecx, edx
+    012e92a2  72 12                             jb 0x12e92b6
+    012e92a4  66 0f 7e d9                       movd ecx, xmm3
+    012e92a8  66 0f 7e e2                       movd edx, xmm4
+    012e92ac  e8 17 00 00 00                    call 0x12e92c8
+    012e92b1  66 0f 6e d9                       movd xmm3, ecx
+    012e92b5  c3                                ret
+    012e92b6  66 0f 7e d1                       movd ecx, xmm2
+    012e92ba  66 0f 7e ea                       movd edx, xmm5
+    012e92be  e8 05 00 00 00                    call 0x12e92c8
+    012e92c3  66 0f 6e d1                       movd xmm2, ecx
+    012e92c7  c3                                ret
+    012e92c8  31 ca                             xor edx, ecx
+    012e92ca  78 02                             js 0x12e92ce
+    012e92cc  41                                inc ecx
+    012e92cd  c3                                ret
+    012e92ce  49                                dec ecx
+    012e92cf  c3                                ret
+
+
+7. far polygons
+---------------
+A worker job (0x810770) simplifies terrain outlines (0x927e10) and closes each
+result with push_back(front()). Far out the points collapse, the result is empty
+and front() is a null pointer: crash. The branch at 0x810865 only runs for an
+empty result; it now goes straight to the next outline (same bookkeeping as the
+loop, without adding the point), leaving the empty outline empty. Outputs start
+empty and the simplifier fills any outline of 3+ points, so this branch only runs
+where the original always crashed. Far-away fix: does nothing for players who
+don't go that far.
+
+  pattern at 0x810854
+    8b04d989028b44d9048942048b5dfceb5f3bca754a8bc22bc1c1f80383f801733e2bcfb8ffffff1f
+    c1f9032bc183f80172752bd78d5901c1fa03b8ffffff1f8bcad1e92bc13bc2730433d2eb0203d13b
+    d38bce0f42d352e8????????8b5dfc8b4e0485c9740a8b0789018b47048941048b45ec83c30c8346
+    04088b75f846895dfc8b48048b382bcfb8abaaaa2a8975f8f7e9
+
+  before
+    00810865  3b ca                             cmp ecx, edx
+    00810867  75 4a                             jne 0x8108b3
+    00810869  8b c2                             mov eax, edx
+    0081086b  2b c1                             sub eax, ecx
+  after
+    00810865  8b 45 ec                          mov eax, dword ptr [ebp - 0x14]
+    00810868  83 c3 0c                          add ebx, 0xc
+    0081086b  eb 61                             jmp 0x8108ce

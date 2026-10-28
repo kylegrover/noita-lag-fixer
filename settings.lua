@@ -24,6 +24,17 @@ mod_settings = {
     fix("sprite_stains", "Sprite stains",
         "Wet/bloody/burning overlays: rotation computed once per sprite, not per pixel."),
     {
+        category_id = "far_away",
+        ui_name = "Far-away fixes",
+        ui_description = "Only for trips to x = 17 million and beyond (parallel world ~470+); they do nothing closer.",
+        settings = {
+            fix("far_rays", "Pixel scene freeze",
+                "Game freezing forever (around x = 20 million) when a pixel scene loads."),
+            fix("far_polygons", "Terrain crash",
+                "Crash when terrain collision shapes shrink to nothing (around x = 20 million)."),
+        },
+    },
+    {
         id = "other_builds",
         ui_name = "Other noita.exe versions",
         ui_description = "Also apply fixes on a noita.exe other than the Jan 25 2025 Steam build"
