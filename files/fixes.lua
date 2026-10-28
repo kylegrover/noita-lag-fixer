@@ -10,15 +10,19 @@
 -- exe patched on disk with the same changes, or an earlier start in this process) are skipped.
 -- Nothing is undone at runtime: turn a fix off and restart Noita.
 --
--- On any other noita.exe nothing is written unless options.other_builds is set, and apply()
--- also returns a scan report saying what was found.
+-- On any other noita.exe nothing is written unless options.other_builds is set or it's one of
+-- the CHECKED builds, and apply() also returns a scan report saying what was found.
 --
 -- `memory` (files/memory.lua, or a fake in tests) provides image_base(), read(va, n),
 -- write(va, bytes), alloc(code_bytes, data_bytes), seal(va, n), get_marker() and set_marker(s).
 local Fixes = {}
 
-Fixes.VERSION = "1.2.0"
+Fixes.VERSION = "1.2.1"
 local IMAGE_BASE, TIMESTAMP = 0x400000, 0x6794EE3C
+-- Other builds where every fix was found, each at a consistent shift from the build above (GOG,
+-- from a player's scan report) or with identical code (Steam beta): fixes apply by pattern
+-- without options.other_builds.
+local CHECKED = {[0x6794F6B1] = "GOG Jan 25 2025", [0x6794C092] = "Steam beta branch Jan 25 2025"}
 -- The caves are written for code at 0x12e9000 and data at 0x12ea000 (where an exe patched on disk
 -- puts them, right after the image) and relocated from there.
 local EXE_CAVE_VA, EXE_TABLE_VA = 0x12E9000, 0x12EA000
@@ -379,12 +383,13 @@ local function count_text(n)
 end
 
 -- What the search found, for scan-report.txt.
-local function report(message, base, h, known, code, scans)
+local function report(message, base, h, known, checked, code, scans)
     local lines = {
         "Lag Fixer " .. Fixes.VERSION .. " scan report",
         "result: " .. message,
         string.format("noita.exe: PE timestamp 0x%08x, image base 0x%08x (%s)", h.timestamp, base,
                       known and "the build Lag Fixer was made for"
+                          or checked and checked .. ", checked against the build Lag Fixer was made for"
                           or string.format("Lag Fixer was made for 0x%08x at 0x%08x", TIMESTAMP, IMAGE_BASE)),
     }
     for _, s in ipairs(code) do
@@ -432,6 +437,7 @@ function Fixes.apply(memory, enabled, options)
     local h = headers(memory, base)
     if h == nil then return PREFIX .. "unsupported noita.exe version, nothing changed", {}, nil end
     local known = base == IMAGE_BASE and h.timestamp == TIMESTAMP
+    local checked = base == IMAGE_BASE and CHECKED[h.timestamp] or nil
     local code = {}
     for _, s in ipairs(h.sections) do
         code[#code + 1] = {name = s.name, va = s.va, text = memory.read(s.va, s.size)}
@@ -460,9 +466,9 @@ function Fixes.apply(memory, enabled, options)
     end
     local function done(message)
         local wanted = options.report or not known or #unknown > 0 or #missing > 0
-        return PREFIX .. message, states, wanted and report(PREFIX .. message, base, h, known, code, scans) or nil
+        return PREFIX .. message, states, wanted and report(PREFIX .. message, base, h, known, checked, code, scans) or nil
     end
-    if not known and not options.other_builds then
+    if not known and not checked and not options.other_builds then
         return done(string.format("unsupported noita.exe version, nothing changed (%d of %d fixes found,"
                                   .. " see scan-report.txt)", found, #Fixes.FIXES))
     end

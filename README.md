@@ -53,14 +53,19 @@ are read from the matched code.
 
 ## Other versions (GOG, updates)
 
-On a noita.exe other than the Jan 25 2025 Steam build (the GOG version, or a future update),
-Lag Fixer changes nothing and writes `mods/noita-lag-fixer/scan-report.txt`, listing which
-fixes it found and where. If you're on GOG, please open an issue with that file.
+The GOG version and Steam's `noitabeta` branch (both also Jan 25 2025) work too: all seven
+fixes are found there, so they apply as on Steam (thanks bepoest for testing GOG).
+
+On any other noita.exe (a future update, say), Lag Fixer changes nothing and writes
+`mods/noita-lag-fixer/scan-report.txt`, listing which fixes it found and where. Please open
+an issue with that file.
 
 If a fix's code is there unchanged (just at different addresses), turning on **Other
 noita.exe versions** in Mod Settings applies it. That's untested on those builds, so keep
-backups of your saves. Fixes it can't find are skipped. A build compiled differently (like
-Steam's `noita_dev.exe`, where only fixes 2 and 7 match) needs the fixes redone for it.
+backups of your saves. Fixes it can't find are skipped: Steam's older-version branches find
+6 of 7 (`update_20240812`, all but west and sky lag) and 4 of 7 (`update_20240214`). A build
+compiled differently (like Steam's `noita_dev.exe`, where only fixes 2 and 7 match) needs the
+fixes redone for it.
 
 ## Messages
 

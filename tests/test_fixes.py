@@ -216,6 +216,17 @@ def test_other_build_with_the_code_moved():
     assert apply(memory, other_builds=True)[0] == "Lag Fixer: fixes active"
 
 
+def test_checked_gog_and_beta_builds_apply_without_the_setting():
+    shift = 0x40
+    for timestamp, name in ((0x6794F6B1, "GOG Jan 25 2025"), (0x6794C092, "Steam beta branch Jan 25 2025")):
+        memory = FakeMemory(image(shift=shift, timestamp=timestamp), alloc_at=(0x2340000, 0x5670000))
+        message, _, report = run(memory)
+        assert message == "Lag Fixer: 7 fixes applied"
+        assert f"PE timestamp 0x{timestamp:08x}, image base 0x00400000 ({name}, checked against" in report
+    moved = FakeMemory(image(shift=shift, timestamp=0x6794F6B1), base=0x10000000)
+    assert run(moved)[0].startswith("Lag Fixer: unsupported noita.exe version, nothing changed")
+
+
 def test_other_build_skips_what_it_cannot_find():
     data = image(shift=0x40, timestamp=1, skip=["contact_walk"])
     explosions = fix_list()[2]
@@ -238,7 +249,7 @@ def test_other_build_skips_what_it_cannot_find():
 def test_report_on_request_for_the_known_build():
     message, _, report = run(FakeMemory(), report=True)
     lines = report.splitlines()
-    assert lines[0] == "Lag Fixer 1.2.0 scan report" and lines[1] == "result: " + message
+    assert lines[0] == "Lag Fixer 1.2.1 scan report" and lines[1] == "result: " + message
     assert "(the build Lag Fixer was made for)" in lines[2]
     assert "code section .text at 0x00401000, 0x8ff000 bytes" in lines
     assert "  pattern 1 (0x007246a4 in the original build): 1 unpatched, 0 patched, at 0x007246a4" in lines

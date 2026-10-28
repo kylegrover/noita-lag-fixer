@@ -38,7 +38,7 @@ mod_settings = {
         id = "other_builds",
         ui_name = "Other noita.exe versions",
         ui_description = "Also apply fixes on a noita.exe other than the Jan 25 2025 Steam build"
-            .. " (GOG, a later update) when their code is found unchanged. Untested there."
+            .. " (a later update, an older branch) when their code is found unchanged. Untested there."
             .. " Off: only writes scan-report.txt. Takes effect after restarting Noita.",
         value_default = false,
         scope = MOD_SETTING_SCOPE_RUNTIME_RESTART,
