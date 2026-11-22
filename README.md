@@ -2,7 +2,9 @@
 
 An unofficial Noita mod that adds five performance optimizations, plus two fixes for freezes and crashes very far out, by patching the running game's memory at startup. No gameplay is changed, all the calculations are identical just faster.
 
-It's made for the current Steam build (Jan 25 2025). On any other noita.exe it changes nothing by default and writes a report of which fixes it could find (see [Other versions](#other-versions-gog-updates)). Not affiliated with or endorsed by Nolla Games.
+### [Download Noita Lag Fixer v1.2.1](https://github.com/kylegrover/noita-lag-fixer/releases/tag/v1.2.1)
+
+Tested on the current Steam and GoG builds as of Nov 2026. On any other noita.exe it changes nothing by default and writes a report of which fixes it could find (see [Other versions](#other-versions-gog-updates)). Not affiliated with or endorsed by Nolla Games.
 
 ## What it fixes
 
